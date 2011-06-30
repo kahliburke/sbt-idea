@@ -5,6 +5,7 @@ import sbt.Load.BuildStructure
 import sbt.CommandSupport._
 import sbt.complete._
 import sbt.complete.Parsers._
+import sbt.UpdateReport._
 import java.io.File
 import collection.Seq
 import SbtIdeaModuleMapping._
@@ -14,6 +15,7 @@ object SbtIdeaPlugin extends Plugin {
   val ideaProjectName = SettingKey[String]("idea-project-name")
   val ideaProjectGroup = SettingKey[String]("idea-project-group")
   val sbtScalaInstance = SettingKey[ScalaInstance]("sbt-scala-instance")
+  val useLocalMavenRepo = SettingKey[Boolean]("use-local-maven-repo")
   override lazy val settings = Seq(Keys.commands += ideaCommand, ideaProjectName := "IdeaProject")
 
   private val WithClassifiers = "with-classifiers"
@@ -92,6 +94,8 @@ object SbtIdeaPlugin extends Plugin {
     val baseDirectory = setting(Keys.baseDirectory, "Missing base directory!")
     val target = setting(Keys.target, "Missing target directory")
 
+    val useLocalMaven = optionalSetting(useLocalMavenRepo)
+
     def directoriesFor(config: Configuration) = Directories(
         setting(Keys.unmanagedSourceDirectories in config, "Missing unmanaged source directories!"),
         setting(Keys.unmanagedResourceDirectories in config, "Missing unmanaged resource directories!"),
@@ -108,12 +112,17 @@ object SbtIdeaPlugin extends Plugin {
     val libraries = EvaluateTask.evaluateTask(buildStruct, Keys.update, state, projectRef, false, EvaluateTask.SystemProcessors) match {
 
       case Some(Value(report)) =>
-        val libraries = convertDeps(report, deps, scalaInstance.version)
+
+        val useMavenLibs = useLocalMaven match { 
+          case Some(b: Boolean) => b
+          case None => false
+        }
+        val libraries = convertDeps(report, deps, scalaInstance.version, useMavenLibs)
 
         val withClassifiers = {
           if (args.contains(WithClassifiers)) {
             EvaluateTask.evaluateTask(buildStruct, Keys.updateClassifiers, state, projectRef, false, EvaluateTask.SystemProcessors) match {
-              case Some(Value(report)) => addClassifiers(libraries, report)
+              case Some(Value(report)) => addClassifiers(libraries, report, useMavenLibs)
               case _ => libraries
             }
           }
@@ -122,7 +131,7 @@ object SbtIdeaPlugin extends Plugin {
 
         if (args.contains(WithSbtClassifiers)) {
           EvaluateTask.evaluateTask(buildStruct, Keys.updateSbtClassifiers, state, projectRef, false, EvaluateTask.SystemProcessors) match {
-            case Some(Value(report)) => addClassifiers(withClassifiers, report)
+            case Some(Value(report)) => addClassifiers(withClassifiers, report, useMavenLibs)
             case _ => withClassifiers
           }
         }
