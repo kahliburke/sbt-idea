@@ -57,7 +57,8 @@ object SbtIdeaPlugin extends Plugin {
 
     val parent = new ParentProjectIdeaModuleDescriptor(projectInfo, env, logger(state))
     parent.save()
-    val rootFiles = new IdeaProjectDescriptor(projectInfo, env, logger(state))
+    val useLocalMaven = useLocalMavenRepo in extracted.currentRef get buildStruct.data getOrElse(false)
+    val rootFiles = new IdeaProjectDescriptor(projectInfo, env, logger(state), useLocalMaven)
     rootFiles.save()
 
     val imlDir = new File(projectInfo.baseDir, env.modulePath.get)

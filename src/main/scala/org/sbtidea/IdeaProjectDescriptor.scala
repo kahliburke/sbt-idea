@@ -27,7 +27,7 @@ object OutputUtil {
   }
 }
 
-class IdeaProjectDescriptor(val projectInfo: IdeaProjectInfo, val env: IdeaProjectEnvironment, val log: Logger) {
+class IdeaProjectDescriptor(val projectInfo: IdeaProjectInfo, val env: IdeaProjectEnvironment, val log: Logger, val useMavenRepo: Boolean) {
 
   def projectRelative(file: File) = {
     IO.relativize(projectInfo.baseDir, file.getCanonicalFile).map ("$PROJECT_DIR$/" + _).getOrElse(file.getCanonicalPath)
@@ -119,11 +119,14 @@ class IdeaProjectDescriptor(val projectInfo: IdeaProjectInfo, val env: IdeaProje
 
       val librariesDir = configFile("libraries")
       librariesDir.mkdirs
-      for (ideaLib <- projectInfo.ideaLibs) {
-        // MUST all be _
-        val filename = ideaLib.name.replace('.', '_').replace('-', '_').replace(':', '_').replace(' ', '_') + ".xml"
+      val filenamesAndLibs = for (ideaLib <- projectInfo.ideaLibs)
+        yield (ideaLib, ideaLib.name.replace('.', '_').replace('-', '_').replace(':', '_').replace(' ', '_') + ".xml")
+
+      filenamesAndLibs.foreach { ideaLibAndFileName =>
+        val (ideaLib, filename) = ideaLibAndFileName
         saveFile(librariesDir, filename, libraryTableComponent(ideaLib))
       }
+
 
       log.info("Created " + configDir)
     } else log.error("Skipping .idea creation for " + projectInfo.baseDir + " since directory does not exist")
