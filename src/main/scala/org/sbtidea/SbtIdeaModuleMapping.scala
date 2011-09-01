@@ -23,20 +23,31 @@ object SbtIdeaModuleMapping {
       case true =>"Maven: %s:%s:%s".format(module.organization, module.name, module.revision)
       case false => module.organization + "_" + module.name + "_" + module.revision
     }
+
     IdeaLibrary(name,
-      classes = moduleReport.artifacts.collect{ case (artifact, file) if (artifact.classifier == None || artifact.classifier == Some(("classes"))) =>
-        depFile(module, artifact, file, useMavenRepo)},
-      javaDocs = moduleReport.artifacts.collect{ case (artifact, file) if (artifact.classifier == Some("javadoc")) =>
-        depFile(module, artifact, file, useMavenRepo)},
-      sources = moduleReport.artifacts.collect{ case (artifact, file) if (artifact.classifier == Some("sources")) =>
-        depFile(module, artifact, file, useMavenRepo)}
+      classes = moduleReport.artifacts.collect {
+        case (artifact, file) if (artifact.classifier == None || artifact.classifier == Some("classes")) =>
+          depFile(module, artifact, file, useMavenRepo)
+      },
+      javaDocs = moduleReport.artifacts.collect{
+        case (artifact, file) if (artifact.classifier == Some("javadoc")) =>
+          depFile(module, artifact, file, useMavenRepo)
+        case (artifact, file) if (artifact.classifier == None || artifact.classifier == Some("classes")) =>
+          depFile(module, artifact, file, useMavenRepo, Some("javadoc"))
+      },
+      sources = moduleReport.artifacts.collect{
+        case (artifact, file) if (artifact.classifier == Some("sources")) =>
+          depFile(module, artifact, file, useMavenRepo)
+        case (artifact, file) if (artifact.classifier == None || artifact.classifier == Some("classes")) =>
+          depFile(module, artifact, file, useMavenRepo, Some("sources"))
+      }
     )
   }
 
-  private def depFile(id: ModuleID, a: Artifact, ivyFile: File, useMavenRepo: Boolean): File = {
+  private def depFile(id: ModuleID, a: Artifact, ivyFile: File, useMavenRepo: Boolean, overrideClassifier: Option[String] = None): File = {
     useMavenRepo match {
       case true => {
-        val f = mavenFile(id, a)
+        val f = mavenFile(id, a, overrideClassifier)
         if (f.exists) f else ivyFile
       }
       case false => ivyFile
