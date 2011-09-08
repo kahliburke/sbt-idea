@@ -30,7 +30,14 @@ object OutputUtil {
 class IdeaProjectDescriptor(val projectInfo: IdeaProjectInfo, val env: IdeaProjectEnvironment, val log: Logger, val useMavenRepo: Boolean) {
 
   def projectRelative(file: File) = {
-    IO.relativize(projectInfo.baseDir, file.getCanonicalFile).map ("$PROJECT_DIR$/" + _).getOrElse(file.getCanonicalPath)
+    IO.relativize(projectInfo.baseDir, file.getCanonicalFile).map ("$PROJECT_DIR$/" + _).getOrElse(replaceUserHome(file.getCanonicalPath))
+  }
+
+  def replaceUserHome(path: String): String = {
+    val userHome = System.getProperty("user.home")
+    if (path.contains(userHome)) {
+      path.replace(userHome, "$USER_HOME$")
+    } else path
   }
 
   val vcsName = List("svn", "Git").foldLeft("") { (res, vcs) =>
@@ -72,10 +79,11 @@ class IdeaProjectDescriptor(val projectInfo: IdeaProjectInfo, val env: IdeaProje
           })
           }
         </CLASSES>
-        <JAVADOC />
+        <JAVADOC>
         {
         library.javaDocs.map(file => <root url={String.format("jar://%s!/", projectRelative(file))} />)
         }
+        </JAVADOC>
         <SOURCES>
           {
           library.sources.map(file => {

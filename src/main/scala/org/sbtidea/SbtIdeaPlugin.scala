@@ -16,12 +16,16 @@ object SbtIdeaPlugin extends Plugin {
   val ideaProjectGroup = SettingKey[String]("idea-project-group")
   val sbtScalaInstance = SettingKey[ScalaInstance]("sbt-scala-instance")
   val useLocalMavenRepo = SettingKey[Boolean]("use-local-maven-repo")
-  override lazy val settings = Seq(Keys.commands += ideaCommand, ideaProjectName := "IdeaProject")
+  //override lazy val settings = Seq(Keys.commands += ideaCommand, ideaProjectName := "IdeaProject")
+  val ideaIgnoreModule = SettingKey[Boolean]("idea-ignore-module")
+  val ideaBasePackage = SettingKey[Option[String]]("idea-base-package", "The base package configured in the Scala Facet, used by IDEA to generated nested package clauses. For example, com.acme.wibble")
 
-  private val WithClassifiers = "with-classifiers"
-  private val WithSbtClassifiers = "with-sbt-classifiers"
-  
-  private val args = (Space ~> WithClassifiers | Space ~> WithSbtClassifiers).*
+  override lazy val settings = Seq(Keys.commands += ideaCommand, ideaProjectName := "IdeaProject", ideaBasePackage := None)
+
+  private val NoClassifiers = "no-classifiers"
+  private val NoSbtClassifiers = "no-sbt-classifiers"
+
+  private val args = (Space ~> NoClassifiers | Space ~> NoSbtClassifiers).*
 
   private lazy val ideaCommand = Command("gen-idea")(_ => args)(doCommand)
 
@@ -37,11 +41,20 @@ object SbtIdeaPlugin extends Plugin {
     val extracted = Project.extract(state)
     val buildStruct = extracted.structure
     val buildUnit = buildStruct.units(buildStruct.root)
+
     val uri = buildStruct.root
     val name: Option[String] = ideaProjectName in extracted.currentRef get buildStruct.data
-    val projectList = buildUnit.defined.map { case (id, proj) => (ProjectRef(uri, id) -> proj) }
-    val subProjects = projectList.map { case (projRef, project) => projectData(projRef, project, buildStruct,
-      state, args) }.toList
+    val projectList = buildUnit.defined.map {
+      case (id, proj) => (ProjectRef(uri, id) -> proj)
+    }
+
+    def ignoreModule(projectRef: ProjectRef): Boolean = {
+      (ideaIgnoreModule in projectRef get buildStruct.data).getOrElse(false)
+    }
+
+    val subProjects = projectList.collect {
+      case (projRef, project) if (!ignoreModule(projRef)) => projectData(projRef, project, buildStruct, state, args)
+    }.toList
 
     val scalaInstances = subProjects.map(_.scalaInstance).distinct
     val scalaLibs = (sbtInstance :: scalaInstances).map(toIdeaLib(_))
@@ -68,8 +81,25 @@ object SbtIdeaPlugin extends Plugin {
       module.save()
     }
 
+    // Run the `update-sbt-classifiers` task to download and find the path of the SBT sources.
+    // See https://github.com/harrah/xsbt/issues/88 for a problem with this in SBT 0.10.0
+    //
+    // Workaround is to add this resolver to your build (or, temporarily, to your build session).
+    //
+    // resolvers += Resolver.url("typesafe-snapshots") artifacts "http://repo.typesafe.com/typesafe/ivy-snapshots/[organisation]/[module]/[revision]/jars/[artifact](-[classifier]).[ext]"
+    //
+    val sbtModuleSourceFiles: Seq[File] = {
+      val sbtLibs: Seq[IdeaLibrary] = if (!args.contains(NoSbtClassifiers)) {
+        EvaluateTask.evaluateTask(buildStruct, Keys.updateSbtClassifiers, state, projectList.head._1, false, EvaluateTask.SystemProcessors) match {
+          case Some(Value(report)) => extractLibraries(report)
+          case _ => Seq()
+        }
+      } else Seq()
+      sbtLibs.flatMap(_.sources)
+    }
+
     val sbtDef = new SbtProjectDefinitionIdeaModuleDescriptor(imlDir, projectInfo.baseDir,
-      new File(projectInfo.baseDir, "project"), sbtScalaVersion, sbtVersion, sbtOut, logger(state))
+      new File(projectInfo.baseDir, "project"), sbtScalaVersion, sbtVersion, sbtOut, buildUnit.classpath, sbtModuleSourceFiles, logger(state))
     sbtDef.save()
 
     state
@@ -80,68 +110,78 @@ object SbtIdeaPlugin extends Plugin {
 
     def optionalSetting[A](key: ScopedSetting[A]) = key in projectRef get buildStruct.data
 
+    def logErrorAndFail(errorMessage: String): Nothing = {
+      logger(state).error(errorMessage);
+      throw new IllegalArgumentException()
+    }
+
     def setting[A](key: ScopedSetting[A], errorMessage: => String) = {
       optionalSetting(key) getOrElse {
-        logger(state).error(errorMessage); throw new IllegalArgumentException()
+        logErrorAndFail(errorMessage)
       }
     }
 
-    val projectName = setting(Keys.name, "Missing project name!")
+    // The SBT project name and id can be different, we choose the id as the
+    // IDEA project name. It must be consistent with the value of SubProjectInfo#dependencyProjects.
+    val projectName = project.id
+
     logger(state).info("Trying to create an Idea module " + projectName)
 
     val ideaGroup = optionalSetting(ideaProjectGroup)
-    val scalaInstance = setting(Keys.scalaInstance, "Missing scala instance")
+    val scalaInstance: ScalaInstance = {
+      val missingScalaInstanceMessage = "Missing scala instance"
+      // Compatibility from SBT 0.10.1 -> 0.10.2-SNAPSHOT
+      (Keys.scalaInstance: Any) match {
+        case k: ScopedSetting[_] =>
+          setting(k.asInstanceOf[ScopedSetting[ScalaInstance]], missingScalaInstanceMessage)
+        case t: TaskKey[_] =>
+          val scalaInstanceTaskKey = t.asInstanceOf[TaskKey[ScalaInstance]]
+          EvaluateTask.evaluateTask(buildStruct, scalaInstanceTaskKey, state, projectRef, false, EvaluateTask.SystemProcessors) match {
+            case Some(Value(instance)) => instance
+            case _ => logErrorAndFail(missingScalaInstanceMessage)
+          }
+      }
+    }
 
     val baseDirectory = setting(Keys.baseDirectory, "Missing base directory!")
     val target = setting(Keys.target, "Missing target directory")
 
     val useLocalMaven = optionalSetting(useLocalMavenRepo)
 
-    def directoriesFor(config: Configuration) = Directories(
-        setting(Keys.unmanagedSourceDirectories in config, "Missing unmanaged source directories!"),
+    def directoriesFor(config: Configuration) = {
+      val hasSourceGen = optionalSetting(Keys.sourceGenerators in config).exists(!_.isEmpty)
+      val managedSourceDirs = if (hasSourceGen) {
+        setting(Keys.managedSourceDirectories in config, "Missing managed source directories!")
+      }
+      else Seq.empty[File]
+
+      // By default, SBT considers .scala files in the base directory as a project as compile
+      // scoped sources. SBT itself uses this structure.
+      //
+      // This doesn't fit so well in IDEA, it only has a concept of source directories, not source files.
+      // So we begrudgingly add the root dir as a source dir *only* if we find some .scala files there.
+      val baseDirs = {
+        val baseDir = setting(Keys.baseDirectory, "Missing base directory!")
+        val baseDirDirectlyContainsSources = baseDir.listFiles().exists(f => f.isFile && f.ext == "scala")
+        if (config.name == "compile" && baseDirDirectlyContainsSources) Seq[File](baseDir) else Seq[File]()
+      }
+
+      Directories(
+        setting(Keys.unmanagedSourceDirectories in config, "Missing unmanaged source directories!") ++
+                managedSourceDirs ++ baseDirs,
         setting(Keys.unmanagedResourceDirectories in config, "Missing unmanaged resource directories!"),
         setting(Keys.classDirectory in config, "Missing class directory!"))
-
+    }
     val compileDirectories: Directories = directoriesFor(Configurations.Compile)
     val testDirectories: Directories = directoriesFor(Configurations.Test)
 
-    val deps = EvaluateTask.evaluateTask(buildStruct, Keys.externalDependencyClasspath in Configurations.Test, state, projectRef, false, EvaluateTask.SystemProcessors) match {
-      case Some(Value(deps)) => deps
-      case _ => logger(state).error("Failed to obtain dependency classpath"); throw new IllegalArgumentException()
-    }
-    
-    val libraries = EvaluateTask.evaluateTask(buildStruct, Keys.update, state, projectRef, false, EvaluateTask.SystemProcessors) match {
-
-      case Some(Value(report)) =>
-
-        val useMavenLibs = useLocalMaven match { 
-          case Some(b: Boolean) => b
-          case None => false
-        }
-        val libraries = convertDeps(report, deps, scalaInstance.version, useMavenLibs)
-
-        val withClassifiers = {
-          if (args.contains(WithClassifiers)) {
-            EvaluateTask.evaluateTask(buildStruct, Keys.updateClassifiers, state, projectRef, false, EvaluateTask.SystemProcessors) match {
-              case Some(Value(report)) => addClassifiers(libraries, report, useMavenLibs)
-              case _ => libraries
-            }
-          }
-          else libraries
-        }
-
-        if (args.contains(WithSbtClassifiers)) {
-          EvaluateTask.evaluateTask(buildStruct, Keys.updateSbtClassifiers, state, projectRef, false, EvaluateTask.SystemProcessors) match {
-            case Some(Value(report)) => addClassifiers(withClassifiers, report, useMavenLibs)
-            case _ => withClassifiers
-          }
-        }
-        else withClassifiers
-
-      case _ => Seq.empty
-    }
-
+    val librariesExtractor = new SbtIdeaModuleMapping.LibrariesExtractor(buildStruct, state, projectRef,
+      logger(state), scalaInstance,
+      withClassifiers = !args.contains(NoClassifiers), useLocalMaven
+    )
+    val basePackage = setting(ideaBasePackage, "missing IDEA base package")
     SubProjectInfo(baseDirectory, projectName, project.uses.map(_.project).toList, compileDirectories,
-      testDirectories, libraries.map(_._1), scalaInstance, ideaGroup, None)
+      testDirectories, librariesExtractor.allLibraries, scalaInstance, ideaGroup, None, basePackage)
   }
+
 }
