@@ -114,7 +114,7 @@ object SbtIdeaModuleMapping {
     }
 
     IdeaLibrary(name,
-      classes = findByClassifier(None),
+      classes = findByClassifier(None) ++ findByClassifier(Some("classes")),
       javaDocs = findByClassifier(Some("javadoc")),
       sources = findByClassifier(Some("sources")))
 
