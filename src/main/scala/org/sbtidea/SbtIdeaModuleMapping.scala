@@ -101,7 +101,7 @@ object SbtIdeaModuleMapping {
     m1.organization == m2.organization && name(m1) == name(m2)
   }
 
-  private def ideaLibFromModule(moduleReport: ModuleReport, useMavenRepo: Boolean): IdeaLibrary = {
+  private def ideaLibFromModule(moduleReport: ModuleReport, useMavenRepo: Boolean, libraryDep: Option[ModuleID] = None): IdeaLibrary = {
     val module = moduleReport.module
 
     val name = useMavenRepo match {
@@ -116,7 +116,8 @@ object SbtIdeaModuleMapping {
     IdeaLibrary(name,
       classes = findByClassifier(None) ++ findByClassifier(Some("classes")),
       javaDocs = findByClassifier(Some("javadoc")),
-      sources = findByClassifier(Some("sources")))
+      sources = findByClassifier(Some("sources")),
+      projectDir = libraryDep.flatMap( d => d.extraAttributes.get(SbtIdeaPlugin.LocalProjectRootAttributeName).map(f => new File(f))))
 
 //    IdeaLibrary(name,
 //      classes = moduleReport.artifacts.collect {
@@ -185,9 +186,15 @@ object SbtIdeaModuleMapping {
 //    println("%s, %s".format(configuration, deps))
 
     //modules.map( moduleReport => (IdeaModuleLibRef(scope, ideaLibFromModule(moduleReport, useMavenLibs)), moduleReport.module))
+
     modules.filter(modReport => depFilter(modReport.module)).map(moduleReport => {
-      (IdeaModuleLibRef(scope, ideaLibFromModule(moduleReport, useMavenLibs)), moduleReport.module)
+      (IdeaModuleLibRef(scope, ideaLibFromModule(moduleReport, useMavenLibs,
+        libraryDep=libraryDepForModule(deps, scalaVersion, moduleReport.module))), moduleReport.module)
     })
+  }
+
+  def libraryDepForModule(deps: Keys.Classpath, scalaVersion:String, module: ModuleID) = {
+    deps.map(_.get(Keys.moduleID.key).get).find { m => equivModule (m, module, scalaVersion) }
   }
 
   private def libDepFilter(deps: Seq[ModuleID], scalaVersion: String)(module: ModuleID): Boolean = {
@@ -241,7 +248,8 @@ object SbtIdeaModuleMapping {
                     val il = ideaLibFromModule(moduleReport, useMavenLibs)
                     il.copy(classes = il.classes ++ moduleLibRef.library.classes,
                       javaDocs = il.javaDocs ++ moduleLibRef.library.javaDocs,
-                      sources = il.sources ++ moduleLibRef.library.sources)
+                      sources = il.sources ++ moduleLibRef.library.sources,
+                      projectDir = moduleLibRef.library.projectDir)
                   }
 
                   moduleLibRef.copy(library = ideaLibrary) -> moduleId

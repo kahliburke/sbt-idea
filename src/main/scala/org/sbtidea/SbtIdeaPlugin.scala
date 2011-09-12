@@ -20,6 +20,8 @@ object SbtIdeaPlugin extends Plugin {
   val ideaIgnoreModule = SettingKey[Boolean]("idea-ignore-module")
   val ideaBasePackage = SettingKey[Option[String]]("idea-base-package", "The base package configured in the Scala Facet, used by IDEA to generated nested package clauses. For example, com.acme.wibble")
 
+  val LocalProjectRootAttributeName = "e:localProjectRoot"
+
   override lazy val settings = Seq(Keys.commands += ideaCommand, ideaProjectName := "IdeaProject", ideaBasePackage := None)
 
   private val NoClassifiers = "no-classifiers"
