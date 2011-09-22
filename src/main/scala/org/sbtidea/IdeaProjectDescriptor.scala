@@ -88,7 +88,7 @@ class IdeaProjectDescriptor(val projectInfo: IdeaProjectInfo, val env: IdeaProje
           {
           val projectSources =
             library.projectDir.map(file => {
-              for(dir <- Seq("src/main/java", "src/main/resources", "test/main/java", "test/main/resources")) yield
+              for(dir <- Seq("src/main/java", "src/main/resources", "src/test/java", "src/test/resources")) yield
                 <root url={String.format("file://%s/%s", file.toString, dir)} />
             })
 

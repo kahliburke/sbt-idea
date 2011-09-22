@@ -16,11 +16,10 @@ object SbtIdeaPlugin extends Plugin {
   val ideaProjectGroup = SettingKey[String]("idea-project-group")
   val sbtScalaInstance = SettingKey[ScalaInstance]("sbt-scala-instance")
   val useLocalMavenRepo = SettingKey[Boolean]("use-local-maven-repo")
+  val localProjectRoot = SettingKey[Option[String]]("local-project-root")
   //override lazy val settings = Seq(Keys.commands += ideaCommand, ideaProjectName := "IdeaProject")
   val ideaIgnoreModule = SettingKey[Boolean]("idea-ignore-module")
   val ideaBasePackage = SettingKey[Option[String]]("idea-base-package", "The base package configured in the Scala Facet, used by IDEA to generated nested package clauses. For example, com.acme.wibble")
-
-  val LocalProjectRootAttributeName = "e:localProjectRoot"
 
   override lazy val settings = Seq(Keys.commands += ideaCommand, ideaProjectName := "IdeaProject", ideaBasePackage := None)
 

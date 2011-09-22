@@ -101,7 +101,8 @@ object SbtIdeaModuleMapping {
     m1.organization == m2.organization && name(m1) == name(m2)
   }
 
-  private def ideaLibFromModule(moduleReport: ModuleReport, useMavenRepo: Boolean, libraryDep: Option[ModuleID] = None): IdeaLibrary = {
+  private def ideaLibFromModule(moduleReport: ModuleReport, useMavenRepo: Boolean, libraryDep: Option[ModuleID] = None,
+                                 localProjectRoot: Option[String] = None): IdeaLibrary = {
     val module = moduleReport.module
 
     val name = useMavenRepo match {
@@ -117,7 +118,7 @@ object SbtIdeaModuleMapping {
       classes = findByClassifier(None) ++ findByClassifier(Some("classes")),
       javaDocs = findByClassifier(Some("javadoc")),
       sources = findByClassifier(Some("sources")),
-      projectDir = libraryDep.flatMap( d => d.extraAttributes.get(SbtIdeaPlugin.LocalProjectRootAttributeName).map(f => new File(f))))
+      projectDir = libraryDep.flatMap( d => localProjectRoot.map(f => new File(f))))
 
 //    IdeaLibrary(name,
 //      classes = moduleReport.artifacts.collect {
@@ -188,13 +189,17 @@ object SbtIdeaModuleMapping {
     //modules.map( moduleReport => (IdeaModuleLibRef(scope, ideaLibFromModule(moduleReport, useMavenLibs)), moduleReport.module))
 
     modules.filter(modReport => depFilter(modReport.module)).map(moduleReport => {
+      val dep = libraryDepForModule(deps, scalaVersion, moduleReport.module)
       (IdeaModuleLibRef(scope, ideaLibFromModule(moduleReport, useMavenLibs,
-        libraryDep=libraryDepForModule(deps, scalaVersion, moduleReport.module))), moduleReport.module)
+        libraryDep=dep.flatMap(_.get(Keys.moduleID.key)), localProjectRoot=dep.flatMap(_.get(SbtIdeaPlugin.localProjectRoot.key).get))), moduleReport.module)
     })
   }
 
   def libraryDepForModule(deps: Keys.Classpath, scalaVersion:String, module: ModuleID) = {
-    deps.map(_.get(Keys.moduleID.key).get).find { m => equivModule (m, module, scalaVersion) }
+    deps.find{ d =>
+      val m = d.get(Keys.moduleID.key).get
+      equivModule (m, module, scalaVersion)
+    }
   }
 
   private def libDepFilter(deps: Seq[ModuleID], scalaVersion: String)(module: ModuleID): Boolean = {
